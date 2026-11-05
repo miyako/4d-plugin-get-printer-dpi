@@ -90,6 +90,7 @@ void PRINTER_DPI_LIST(sLONG_PTR *pResult, PackagePtr pParams)
 	Param4.fromParamAtIndex(pParams, 4);
 
 #if VERSIONMAC
+	@autoreleasepool {
 	NSPrinter *printer = getPrinter(Param1);
 	if (printer) {
 		Param2.setSize(1);
@@ -108,6 +109,7 @@ void PRINTER_DPI_LIST(sLONG_PTR *pResult, PackagePtr pParams)
 				Param3.appendDoubleValue([h doubleValue]);
 			}
 		}
+	}
 	}
 #else
 	CUTF16String printerName, portName;
@@ -161,6 +163,7 @@ void GET_PRINTER_DPI(sLONG_PTR *pResult, PackagePtr pParams)
 	Param4.fromParamAtIndex(pParams, 4);
 
 #if VERSIONMAC
+	@autoreleasepool {
 	NSPrinter *printer = getPrinter(Param1);
 	if (printer) {
 		NSString *defaultResolution = [printer stringForKey:@"DefaultResolution" inTable:@"PPD"];
@@ -168,6 +171,7 @@ void GET_PRINTER_DPI(sLONG_PTR *pResult, PackagePtr pParams)
 		getDPI(defaultResolution, &dpi_w, &dpi_h);
 		Param2.setDoubleValue(dpi_w);
 		Param3.setDoubleValue(dpi_h);
+	}
 	}
 #else
 	CUTF16String printerName;
