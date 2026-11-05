@@ -1,0 +1,8 @@
+.DS_Store
+build/
+*.4dbase/Logs/
+*.4dbase/userPreferences.*/
+get-printer-dpi.4dbase/Plugins/get-printer-dpi.bundle/Contents/MacOS/get-printer-dpi
+get-printer-dpi.4dbase/Plugins/get-printer-dpi.bundle/Contents/_CodeSignature/
+get-printer-dpi.4dbase/Plugins/Default/
+get-printer-dpi.4dbase/Plugins/get-printer-dpi.build/
