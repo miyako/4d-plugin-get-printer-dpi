@@ -11,6 +11,46 @@ Ask a printer which resolutions it supports, and which one it uses by default. O
 
 Releases: <https://github.com/miyako/4d-plugin-get-printer-dpi/releases>
 
+### Release maintenance
+
+Run **Bump version** on the desired branch with `patch`, `minor`, or `major`.
+It validates and commits coordinated source metadata, then pushes only that
+branch without force or implicit tags. It creates no tag, release, or build.
+Run **Build** separately on the updated branch (no inputs beyond the branch
+selector). Every checkout uses the selected immutable commit, not a moving
+branch or an existing tag. Any branch may be selected.
+
+The source Xcode `MARKETING_VERSION` is authoritative. All three configurations'
+`MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`, source `Info.plist`, and
+`English.lproj/InfoPlist.strings` must agree on strict `X.Y.Z`; recognized plist
+references `$(MARKETING_VERSION)` and `$(CURRENT_PROJECT_VERSION)` are preserved.
+The localized source strings were normalized from `1.0` to the existing `1.0.0`
+without a version increment. Localization revision/schema counters, the
+manifest command IDs, and tracked prebuilt bundle metadata are independent
+and are not bumped.
+
+Build retains the universal macOS 11.5 build, prebuilt-library and bundle
+verification, Developer ID signing, ZIP/DMG notarization, and DMG stapling.
+Windows binaries and other committed bundle resources ship as-is; this workflow
+does not build Windows. Publication is serialized repository-wide across
+branches. It rejects existing remote tags and same-tag releases, including
+drafts, using authenticated, schema-checked paginated listing. API or network
+errors fail closed. These checks run before building and again immediately
+before publication, after all required gates succeed.
+
+Only then does Build push a new nonforced `vX.Y.Z` tag at the exact selected
+commit, verify its remote target, create a new public non-prerelease via REST
+(without generated notes), and upload the original ZIP and DMG without
+overwriting assets. It never updates or deletes an existing release.
+If tag creation, release creation, or upload fails, the workflow fails and
+retains partial state: inspect the run diagnostics, remote tag target, releases
+(including drafts), and uploaded assets before manually deciding how to recover.
+There is no automatic rollback, destructive cleanup, or publication retry;
+do not rerun blindly, as existing publication state is intentionally rejected.
+
+Local lifecycle checks (no native build, signing, or publication):
+`python3 -m unittest discover -s .github/tests -v` and `actionlint`.
+
 ![image](https://cloud.githubusercontent.com/assets/1725068/13600847/01ea0f78-e56f-11e5-8169-4279708ee76d.png)
 
 ---
