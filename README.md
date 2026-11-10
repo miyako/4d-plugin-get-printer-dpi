@@ -51,6 +51,87 @@ do not rerun blindly, as existing publication state is intentionally rejected.
 Local lifecycle checks (no native build, signing, or publication):
 `python3 -m unittest discover -s .github/tests -v` and `actionlint`.
 
+### Native ownership maintenance
+
+Run `python3 tests/native/run.py --baseline` on macOS with Apple clang and
+Python 3.12 or later. This direct, unsigned compile does not invoke either
+project build or any release workflow. It compiles the actual entry point,
+all 16 first-party wrapper implementations, and the complete unchanged bundled
+`4DPluginAPI.c`. Synthetic engine callbacks track string allocations, handles,
+and picture reference counts. Compile-time substitutions replace `NSPrinter`
+and `NSPrintInfo` before the actual exported dispatcher runs: no real printers,
+jobs, defaults, settings, print operations, or dialogs are accessed.
+
+The same final harness is compiled against an immutable `git archive` of
+`af4003cef5a196253de556327e90324da196a685`. Four named baseline cases fail:
+`path-owners` detects the path's double disposal and leaked initial/output
+owners; `temporary-owner` detects the retained `setBytes` temporary;
+`copy-byte-units` reports an ASan heap-buffer-overflow in `createCopy`;
+`command-empty-owners` detects overwritten initial picture owners. The fixed
+sources pass all seven cases with both allocated-empty and null-empty strings.
+The other cases exercise array replacement/shrink/clear, independent transfers,
+borrowed copies, synchronous argument cleanup, owning returns and handoffs,
+raw command-failure sentinels, and both actual exported command selectors.
+Fixtures assert exact ASCII, BMP, supplementary, and empty text, conversion
+byte counts versus UTF-16 code units, terminators, and balanced explicit
+owners under ASan/UBSan. LeakSanitizer is unavailable on macOS; explicit
+accounting covers the modeled native owners, not arbitrary framework leaks.
+
+**Inventory and reachability (baseline above):**
+
+| Tracked native surface | Ownership classification / reachability |
+|---|---|
+| `4DPlugin.cpp`, `4DPlugin.h`, `4D Plugin_Prefix.pch` | SDK `FourDPackex` calls `PluginMain`, then `CommandDispatcher`: selector 1 calls `PRINTER_DPI_LIST`, selector 2 calls `GET_PRINTER_DPI`. Text inputs are copied by `C_TEXT`; outputs are real arrays/scalars. No first-party JSON/object/collection or method callback consumer exists. |
+| `C_TEXT.cpp/.h`, `ARRAY_TEXT.cpp/.h`, `C_TYPES.h` in `4D Plugin API/Classes` | Scalar content setters, independent C++ copies of borrowed inputs, fresh per-element text allocations transferred to arrays. Text-array wrapper is compiled but not used by either DPI command. |
+| `C_PICTURE.cpp/.h` | Compiled dormant helper: path string now has one argument-variable owner; retained output releases its argument owner; `setBytes` releases its temporary after retain; shallow-setter input slots start Undefined; format conversion bytes are divided by `sizeof(PA_Unichar)`. Borrowed picture inputs still detach before cleanup; owning picture returns remain caller-owned. Output-only picture slots still initialize an empty picture for command replacement. |
+| `C_POINTER.cpp/.h` | Compiled dormant pointer/variable metadata bridge; ownership of `PA_GetPointerValue` metadata is deferred rather than clearing or relabeling ambiguous references. |
+| `C_BLOB.cpp/.h` | Compiled dormant byte/handle copies and handoffs; no string descriptors or command callbacks. Unrelated byte-stream algorithms and allocation-error redesign are outside this string audit. |
+| `C_INTEGER`, `C_LONGINT`, `C_REAL`, `C_DATE`, `C_TIME` (`.cpp/.h` each) | Value-only wrappers; `C_REAL` is used by scalar DPI output. No string ownership or callbacks. |
+| `ARRAY_BOOLEAN`, `ARRAY_INTEGER`, `ARRAY_LONGINT`, `ARRAY_REAL`, `ARRAY_DATE`, `ARRAY_TIME` (`.cpp/.h` each) | Value-only array wrappers; `ARRAY_REAL` is used by list output. No text-element owners; SDK handle-allocation failure behavior is not certified. |
+| `4DPluginAPI.c/.h/.def`, `EntryPoints.h`, `Flags.h`, `PrivateTypes.h`, `PublicTypes.h` | Bundled SDK engine boundary, layout, platform types, and export declarations; preserved, not production fix targets. Windows exports `FourDPackex`; macOS gives that entry default visibility. |
+| `get-printer-dpi.vcxproj`, `.vcxproj.filters`, `get-printer-dpi.xcodeproj/project.pbxproj` and tracked workspace/scheme metadata | Both source lists compile the SDK, dispatcher, and all 16 wrappers, with shared header includes. Dormant helpers cannot be excluded from this audit by the manifest alone. Preserved; no project build executed. |
+| Source `manifest.json` and bundled `Contents/Resources/manifest.json` | Identical two-command declarations: `PRINTER DPI LIST(&T;&Y;&Y;&T)` and `GET PRINTER DPI(&T;&8;&8;&T)`. No text-array command. Bundled binaries/resources/database files were preserved and not executed. |
+
+**SDK provenance and contracts:** the baseline SDK implementation's Git blob
+is `478081f0238f6bc5393222f574bc2656f010b67b`, carried through relocation
+commit `02f5efc6db83a02853fc2088f42ccbb43bbe8f5e` from repository first commit
+`07ccc2020d3bb826a0f76ca2d8f1ae8b4849025a` at
+`printer-dpi/4D Plugin API/4DPluginAPI.c` (not its separate `v11` copy).
+There is no verified upstream
+release pin; the `.c` v14 / `.h` v13 comments are not upstream identity.
+This blob differs from the Poppler skill's reference implementation.
+Canonical guidance read for this audit: `miyako/skills`,
+`4d-skills/skills/4dplugin/SKILL.md` at `e6b492f`.
+
+The actual bundled `PA_SetStringInArray` accepts only Unicode arrays with a
+non-null data handle, `0 <= index <= fNbElements`, and a non-null descriptor
+pointer. Accepted assignment disposes the old element and shallow-transfers
+the new descriptor; rejection retains caller ownership. `PA_GetStringInArray`
+is borrowed. `PA_SetStringVariable` and `PA_SetPictureVariable` shallow-assign
+without clearing old owners; `PA_GetPictureVariable` remains variable-owned.
+`PA_ReturnString`/`PA_SetUnistring` use the engine content setter, not descriptor
+transfer. Picture duplicate with `retainOnly=1` retains. The SDK documents
+charset conversion's result as a byte size; the synthetic conversion reports
+payload bytes, without writing over the caller's preinitialized terminator.
+Command handle failure returns a raw
+kind-0 sentinel even though the kind normalizer calls it a string; method
+handle failure returns Undefined. The sentinel must not be cleaned as an
+owned string.
+
+**Deferred boundaries:** pointer metadata, SDK-only application-path outputs,
+and `PA_GetPictureData` metadata string ownership need real host evidence.
+`PA_ResizeArray` can update the logical count after a failed handle resize;
+ordinary array tests do not certify resize-OOM safety. Failed initial
+array/string creation also needs a verified host failure representation,
+caller-parameter preservation, and an explicit error channel. The existing
+dispatcher silently catches exceptions and no established native error
+notification channel exists; this patch does not invent a success-shaped
+fallback or claim those paths fixed. The tests do not inject those unsupported
+creation/resize failures. No SDK internals, project/manifest metadata, bundled
+binaries, or manual release workflows are changed. This evidence is an Apple
+silicon macOS synthetic-host regression, not a real 4D host, Windows, Intel
+runtime, or exact Poppler crash reproduction.
+
 ![image](https://cloud.githubusercontent.com/assets/1725068/13600847/01ea0f78-e56f-11e5-8169-4279708ee76d.png)
 
 ---
